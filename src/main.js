@@ -8,7 +8,7 @@ Actor.main(async () => {
     const {
         keyword = '',
         location = '',
-        category = '',         // only used as filter on listing, not stored
+        category = '',         // used only as filter on listing, NOT stored
         results_wanted: RESULTS_WANTED_RAW = 100,
         max_pages: MAX_PAGES_RAW = 50,
         sortByPublished = true,
@@ -42,21 +42,20 @@ Actor.main(async () => {
     // ------- PHASE 1: Listing via gotScraping -------
     while (page <= MAX_PAGES && jobLinks.size < RESULTS_WANTED) {
         const params = new URLSearchParams(baseParams.toString());
-        params.set('only_html', 'True'); // key trick: server-side rendered HTML
+        params.set('only_html', 'True'); // Force backend-rendered HTML
         params.set('page', String(page));
         params.set('sort_by_published', sortByPublished ? 'True' : 'False');
 
         const pageUrl = `https://powertofly.com/jobs/?${params.toString()}`;
         log.info(`Fetching listing page ${page}: ${pageUrl}`);
 
-        // 🔧 FIX: get proxy URL as a STRING, not a Promise
         const proxyUrl = proxyConf ? await proxyConf.newUrl() : undefined;
 
         let html;
         try {
             const response = await gotScraping({
                 url: pageUrl,
-                proxyUrl,                    // <- now a string or undefined
+                proxyUrl,                   // must be string | undefined
                 timeout: { request: 30000 },
             });
             html = response.body;
@@ -69,26 +68,33 @@ Actor.main(async () => {
 
         const before = jobLinks.size;
 
-        // Primary job-card selectors
+        // Primary selectors: they often don't have nice classes in only_html pages,
+        // so we rely heavily on the href pattern.
         $('.job-card, [data-testid="job-card"], [class*="job-card"], .jobs-list-item, .job-listing')
             .each((_, el) => {
                 const href = $(el).find('a[href*="/jobs/"]').first().attr('href');
                 if (!href) return;
                 try {
                     const abs = new URL(href, 'https://powertofly.com').href;
-                    if (/\/jobs\/\d+/i.test(abs)) jobLinks.add(abs);
+                    // 🔧 FIX: match /jobs/detail/... instead of /jobs/\d+
+                    if (/\/jobs\/detail\//i.test(abs)) {
+                        jobLinks.add(abs);
+                    }
                 } catch {
                     // ignore bad URLs
                 }
             });
 
-        // Fallback: any /jobs/ links
+        // Fallback: ANY <a> that looks like a job detail link
         $('a[href*="/jobs/"]').each((_, el) => {
             const href = $(el).attr('href');
             if (!href) return;
             try {
                 const abs = new URL(href, 'https://powertofly.com').href;
-                if (/\/jobs\/\d+/i.test(abs)) jobLinks.add(abs);
+                // 🔧 FIX: same here — look for /jobs/detail/
+                if (/\/jobs\/detail\//i.test(abs)) {
+                    jobLinks.add(abs);
+                }
             } catch {
                 // ignore
             }
@@ -97,7 +103,7 @@ Actor.main(async () => {
         const after = jobLinks.size;
         const gained = after - before;
 
-        log.info(`Page ${page}: +${gained} jobs → total ${after}`);
+        log.info(`Page ${page}: +${gained} job links → total ${after}`);
 
         if (gained === 0) {
             log.info(`No new jobs on page ${page}. Stopping pagination.`);
@@ -110,7 +116,7 @@ Actor.main(async () => {
     }
 
     if (jobLinks.size === 0) {
-        log.warning('No job links found from listing pages.');
+        log.warning('No job links found from listing pages. Exiting.');
         return;
     }
 
@@ -166,7 +172,7 @@ Actor.main(async () => {
                 if (Array.isArray(json)) raw.push(...json);
                 else raw.push(json);
             } catch {
-                // ignore broken JSON
+                // ignore invalid JSON
             }
         });
 
@@ -233,7 +239,7 @@ Actor.main(async () => {
         }
     }
 
-    // ------- PHASE 2: Fast Detail Scraping via CheerioCrawler -------
+    // ------- PHASE 2: Detail Scraping via CheerioCrawler -------
     let saved = 0;
 
     const detailCrawler = new CheerioCrawler({
@@ -305,13 +311,19 @@ Actor.main(async () => {
             // Job type
             if (!data.job_type) {
                 data.job_type =
-                    $('.job-type, .employment-type').first().text().trim() || null;
+                    $('.job-type, .employment-type')
+                        .first()
+                        .text()
+                        .trim() || null;
             }
 
             // Salary
             if (!data.salary) {
                 data.salary =
-                    $('.job-salary, .compensation').first().text().trim() || null;
+                    $('.job-salary, .compensation')
+                        .first()
+                        .text()
+                        .trim() || null;
             }
 
             const item = {
@@ -321,7 +333,6 @@ Actor.main(async () => {
                 title: data.title || null,
                 company: data.company || null,
 
-                // Cleaned location fields
                 location: locNorm.location,
                 is_remote: locNorm.is_remote,
                 remote_type: locNorm.remote_type,
