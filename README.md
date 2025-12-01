@@ -8,12 +8,12 @@ The PowerToFly Jobs Scraper automatically extracts job listings from [PowerToFly
 
 ### Key features:
 
-- **Comprehensive data extraction** - Captures job titles, company names, locations, salary information, employment types, posting dates, and complete descriptions
-- **Flexible search options** - Search by keywords, location, category, or provide direct PowerToFly URLs
-- **Smart pagination** - Automatically navigates through multiple pages of search results
-- **Structured data output** - Returns clean, normalized JSON data ready for integration
-- **Configurable limits** - Control the number of results and pages to crawl
-- **Reliable extraction** - Uses multiple parsing strategies including JSON-LD structured data and HTML fallbacks
+- **API-first listings** - Uses PowerToFly's search API to pull IDs fast and reliably, bypassing infinite scroll
+- **Comprehensive data extraction** - Captures titles, company, locations, salary, job type, posted date, and full descriptions
+- **Flexible search options** - Filter by keywords, location, category, sort order, or start from a specific URL
+- **Configurable limits & dedupe** - Cap pages/results, de-duplicate by job ID, and optionally skip detail visits
+- **Proxy & cookies ready** - Works with Apify proxies and optional custom cookies for hard targets
+- **Structured output** - Clean, normalized JSON via Apify dataset with HTML + text descriptions
 
 ## How much does it cost to scrape PowerToFly jobs?
 
@@ -36,16 +36,17 @@ Configure your scraping job with these parameters:
 | `keyword` | String | Job search keywords (e.g., "Software Engineer", "Data Scientist") | No |
 | `location` | String | Filter by location (e.g., "Remote", "New York", "San Francisco") | No |
 | `category` | String | Filter by job category or industry | No |
-| `startUrl` | String | Direct PowerToFly URL to start scraping (overrides keyword/location) | No |
+| `startUrl` | String | Direct PowerToFly URL to start scraping (detail URL seeds a single job, listing URL seeds filters) | No |
+| `sortByPublished` | Boolean | When true, newest published jobs first | No |
 
 ### Extraction settings
 
 | Field | Type | Description | Default |
 |-------|------|-------------|---------|
 | `collectDetails` | Boolean | Visit each job page to extract full details | `true` |
+| `dedupe` | Boolean | Remove duplicate job IDs before saving | `true` |
 | `results_wanted` | Integer | Maximum number of jobs to extract | `100` |
-| `max_pages` | Integer | Maximum number of listing pages to crawl | `20` |
-| `dedupe` | Boolean | Remove duplicate job postings | `true` |
+| `max_pages` | Integer | Maximum number of listing pages (API pages) to crawl | `20` |
 
 ### Advanced options
 

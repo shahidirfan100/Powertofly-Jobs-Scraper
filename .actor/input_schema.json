@@ -23,10 +23,30 @@
       "description": "Filter jobs by location (e.g., 'New York', 'Remote', 'San Francisco'). Leave empty to search all locations.",
       "editor": "textfield"
     },
+    "category": {
+      "title": "Category",
+      "type": "string",
+      "description": "Filter jobs by category (e.g., 'Engineering', 'Data', 'Marketing'). Leave empty to search all categories.",
+      "editor": "textfield"
+    },
+    "sortByPublished": {
+      "title": "Sort By Published Date",
+      "type": "boolean",
+      "description": "When true, the newest published jobs are returned first.",
+      "editor": "checkbox",
+      "default": true
+    },
     "collectDetails": {
       "title": "Collect Full Job Details",
       "type": "boolean",
       "description": "When enabled, the scraper visits each job detail page to extract complete information including full descriptions, salary, and job type.",
+      "editor": "checkbox",
+      "default": true
+    },
+    "dedupe": {
+      "title": "Dedupe By Job ID",
+      "type": "boolean",
+      "description": "Remove duplicate job IDs across pages before saving.",
       "editor": "checkbox",
       "default": true
     },
@@ -45,6 +65,18 @@
       "minimum": 1,
       "editor": "number",
       "default": 20
+    },
+    "cookies": {
+      "title": "Custom Cookies (Header String)",
+      "type": "string",
+      "description": "Cookies to send with every request, as a single header string (e.g., \"a=1; b=2\").",
+      "editor": "textfield"
+    },
+    "cookiesJson": {
+      "title": "Custom Cookies (JSON)",
+      "type": "string",
+      "description": "Cookies as JSON object or array of {\"name\":\"\",\"value\":\"\"}. Useful when pasting exports from browser devtools.",
+      "editor": "textarea"
     },
     "proxyConfiguration": {
       "title": "Proxy Configuration",
