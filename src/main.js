@@ -8,7 +8,7 @@ Actor.main(async () => {
     const {
         keyword = '',
         location = '',
-        category = '',         // only used for listing filtering, not stored
+        category = '',         // only used as filter on listing, not stored
         results_wanted: RESULTS_WANTED_RAW = 100,
         max_pages: MAX_PAGES_RAW = 50,
         sortByPublished = true,
@@ -37,24 +37,26 @@ Actor.main(async () => {
     log.info(`Base listing URL: ${baseUrl}`);
 
     const jobLinks = new Set();
-
-    // ------- PHASE 1: Listing via gotScraping -------
     let page = 1;
 
+    // ------- PHASE 1: Listing via gotScraping -------
     while (page <= MAX_PAGES && jobLinks.size < RESULTS_WANTED) {
         const params = new URLSearchParams(baseParams.toString());
-        params.set('only_html', 'True');      // Magic parameter that forces backend to return full HTML
+        params.set('only_html', 'True'); // key trick: server-side rendered HTML
         params.set('page', String(page));
         params.set('sort_by_published', sortByPublished ? 'True' : 'False');
 
         const pageUrl = `https://powertofly.com/jobs/?${params.toString()}`;
         log.info(`Fetching listing page ${page}: ${pageUrl}`);
 
+        // 🔧 FIX: get proxy URL as a STRING, not a Promise
+        const proxyUrl = proxyConf ? await proxyConf.newUrl() : undefined;
+
         let html;
         try {
             const response = await gotScraping({
                 url: pageUrl,
-                proxyUrl: proxyConf ? proxyConf.newUrl() : undefined,
+                proxyUrl,                    // <- now a string or undefined
                 timeout: { request: 30000 },
             });
             html = response.body;
@@ -75,17 +77,21 @@ Actor.main(async () => {
                 try {
                     const abs = new URL(href, 'https://powertofly.com').href;
                     if (/\/jobs\/\d+/i.test(abs)) jobLinks.add(abs);
-                } catch {}
+                } catch {
+                    // ignore bad URLs
+                }
             });
 
-        // Fallback selector
+        // Fallback: any /jobs/ links
         $('a[href*="/jobs/"]').each((_, el) => {
             const href = $(el).attr('href');
             if (!href) return;
             try {
                 const abs = new URL(href, 'https://powertofly.com').href;
                 if (/\/jobs\/\d+/i.test(abs)) jobLinks.add(abs);
-            } catch {}
+            } catch {
+                // ignore
+            }
         });
 
         const after = jobLinks.size;
@@ -100,11 +106,11 @@ Actor.main(async () => {
 
         if (after >= RESULTS_WANTED) break;
 
-        page++;
+        page += 1;
     }
 
     if (jobLinks.size === 0) {
-        log.warning("No job links found from listing pages.");
+        log.warning('No job links found from listing pages.');
         return;
     }
 
@@ -125,7 +131,7 @@ Actor.main(async () => {
         }
 
         let text = String(raw).trim().replace(/[\[\]]/g, '');
-        const parts = text.split(/[·•|/,-]/).map(p => p.trim()).filter(Boolean);
+        const parts = text.split(/[·•|/,-]/).map((p) => p.trim()).filter(Boolean);
 
         let isRemote = false;
         let remoteType = null;
@@ -135,7 +141,9 @@ Actor.main(async () => {
             if (p.toLowerCase().includes('remote')) {
                 isRemote = true;
                 if (!remoteType) remoteType = p;
-            } else locations.push(p);
+            } else {
+                locations.push(p);
+            }
         }
 
         const joined = locations.join(' / ') || null;
@@ -157,22 +165,69 @@ Actor.main(async () => {
                 const json = JSON.parse(text);
                 if (Array.isArray(json)) raw.push(...json);
                 else raw.push(json);
-            } catch {}
+            } catch {
+                // ignore broken JSON
+            }
         });
 
-        const flattened = raw.flatMap(o => (o['@graph'] ? o['@graph'] : [o]));
+        const flattened = raw.flatMap((o) => (o && o['@graph'] ? o['@graph'] : [o]));
 
-        return flattened.find(o =>
-            (Array.isArray(o['@type']) && o['@type'].includes('JobPosting')) ||
-            o['@type'] === 'JobPosting'
-        ) || null;
+        const job = flattened.find((o) => {
+            const t = o && o['@type'];
+            if (!t) return false;
+            if (Array.isArray(t)) return t.includes('JobPosting');
+            return t === 'JobPosting';
+        });
+
+        if (!job) return null;
+
+        const data = {};
+        if (job.title) data.title = String(job.title).trim();
+        if (job.description) data.description_html = String(job.description).trim();
+
+        if (job.hiringOrganization && job.hiringOrganization.name) {
+            data.company = String(job.hiringOrganization.name).trim();
+        }
+
+        if (job.jobLocation) {
+            const loc = Array.isArray(job.jobLocation) ? job.jobLocation[0] : job.jobLocation;
+            if (loc && loc.address) {
+                const addr = loc.address;
+                const city = addr.addressLocality || '';
+                const region = addr.addressRegion || '';
+                const country = addr.addressCountry || '';
+                const parts = [city, region, country]
+                    .map((p) => String(p).trim())
+                    .filter(Boolean);
+                if (parts.length) data.location = parts.join(', ');
+            }
+        }
+
+        if (job.datePosted) data.date_posted = String(job.datePosted).trim();
+
+        if (job.employmentType) {
+            data.job_type = Array.isArray(job.employmentType)
+                ? job.employmentType.join(', ')
+                : String(job.employmentType).trim();
+        }
+
+        if (job.baseSalary) {
+            const s = job.baseSalary;
+            const v = s.value || {};
+            const amount = v.value || v.minValue || null;
+            const currency = s.currency || v.currency || null;
+            const unit = s['@type'] || v['@type'] || null;
+            data.salary = [amount, currency, unit].filter(Boolean).join(' ');
+        }
+
+        return data;
     }
 
     function extractJobId(url) {
         try {
             const u = new URL(url);
             const parts = u.pathname.split('/').filter(Boolean);
-            return parts.at(-1) || url;
+            return parts[parts.length - 1] || url;
         } catch {
             return url;
         }
@@ -201,33 +256,41 @@ Actor.main(async () => {
             const ld = parseJsonLd($) || {};
             const data = { ...ld };
 
-            // Fallback title
-            data.title = data.title ||
-                $('h1.job-title, h1[class*="title"], .job-detail-title, h1').first().text().trim() ||
-                null;
+            // Title
+            if (!data.title) {
+                data.title =
+                    $('h1.job-title, h1[class*="title"], .job-detail-title, h1')
+                        .first()
+                        .text()
+                        .trim() || null;
+            }
 
-            // Fallback company
-            data.company = data.company ||
-                $('.company-name, .employer-name, .job-company, [class*="company-name"]')
-                    .first()
-                    .text()
-                    .trim() ||
-                null;
+            // Company
+            if (!data.company) {
+                data.company =
+                    $('.company-name, .employer-name, .job-company, [class*="company-name"]')
+                        .first()
+                        .text()
+                        .trim() || null;
+            }
 
             // Description
-            const desc = $('.job-description, .job-details, .job-content, .description')
-                .first()
-                .html();
-            data.description_html = data.description_html || (desc ? desc.trim() : null);
+            if (!data.description_html) {
+                const desc = $('.job-description, .job-details, .job-content, .description')
+                    .first()
+                    .html();
+                data.description_html = desc ? desc.trim() : null;
+            }
             data.description_text = cleanText(data.description_html);
 
             // Location
             let loc = data.location;
             if (!loc) {
-                loc = $('.job-location, .job-detail-location, .location')
-                    .first()
-                    .text()
-                    .trim() || null;
+                loc =
+                    $('.job-location, .job-detail-location, .location')
+                        .first()
+                        .text()
+                        .trim() || null;
             }
 
             const locNorm = normalizeLocation(loc);
@@ -235,7 +298,8 @@ Actor.main(async () => {
             // Date posted
             if (!data.date_posted) {
                 const dateEl = $('time[datetime], .posted-date, [class*="date"]').first();
-                data.date_posted = dateEl.attr('datetime')?.trim() || dateEl.text().trim() || null;
+                data.date_posted =
+                    dateEl.attr('datetime')?.trim() || dateEl.text().trim() || null;
             }
 
             // Job type
@@ -257,6 +321,7 @@ Actor.main(async () => {
                 title: data.title || null,
                 company: data.company || null,
 
+                // Cleaned location fields
                 location: locNorm.location,
                 is_remote: locNorm.is_remote,
                 remote_type: locNorm.remote_type,
@@ -271,14 +336,14 @@ Actor.main(async () => {
             };
 
             await Dataset.pushData(item);
-            saved++;
+            saved += 1;
             log.info(`Saved ${saved}/${RESULTS_WANTED}`);
         },
     });
 
     await detailCrawler.run(
-        detailUrls.map(url => ({ url }))
+        detailUrls.map((url) => ({ url }))
     );
 
-    log.info(`Job done. Successfully saved ${saved} jobs.`);
+    log.info(`Job finished. Saved ${saved} jobs.`);
 });
