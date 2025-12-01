@@ -66,18 +66,6 @@
       "editor": "number",
       "default": 20
     },
-    "cookies": {
-      "title": "Custom Cookies (Header String)",
-      "type": "string",
-      "description": "Cookies to send with every request, as a single header string (e.g., \"a=1; b=2\").",
-      "editor": "textfield"
-    },
-    "cookiesJson": {
-      "title": "Custom Cookies (JSON)",
-      "type": "string",
-      "description": "Cookies as JSON object or array of {\"name\":\"\",\"value\":\"\"}. Useful when pasting exports from browser devtools.",
-      "editor": "textarea"
-    },
     "proxyConfiguration": {
       "title": "Proxy Configuration",
       "type": "object",

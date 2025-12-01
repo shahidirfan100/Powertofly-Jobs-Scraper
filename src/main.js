@@ -209,6 +209,56 @@ async function fetchSitemapJobLinks(limit) {
     return urls;
 }
 
+function extractRemoteInfo($) {
+    // Prefer explicit labels/badges that mention remote/hybrid.
+    const candidates = [
+        '.job-remote',
+        '.job-remote-type',
+        '[class*="remote"]',
+        '.job-tags',
+        '.job-type',
+        '.job-location',
+    ];
+
+    for (const sel of candidates) {
+        const txt = $(sel).first().text().trim();
+        if (!txt) continue;
+        const lower = txt.toLowerCase();
+        if (lower.includes('remote') || lower.includes('hybrid')) {
+            return txt;
+        }
+    }
+    return null;
+}
+
+function extractSalary($, descriptionText) {
+    // 1) dedicated salary/compensation elements
+    const selectors = [
+        '.job-salary',
+        '.compensation',
+        '[class*="salary"]',
+        '[class*="compensation"]',
+        '[data-testid*="salary"]',
+    ];
+    for (const sel of selectors) {
+        const txt = $(sel).first().text().trim();
+        if (txt) return txt;
+    }
+
+    // 2) meta tags
+    const metaSalary =
+        $('meta[name="salary"], meta[itemprop="baseSalary"]').attr('content') ||
+        $('meta[property="og:salary"]').attr('content');
+    if (metaSalary) return metaSalary.trim();
+
+    // 3) pattern search in description text
+    if (descriptionText) {
+        const match = descriptionText.match(/(\$|£|€)\s?\d[\d,.]*(\s*-\s*(\$|£|€)?\s?\d[\d,.]*)?/);
+        if (match) return match[0];
+    }
+    return null;
+}
+
 Actor.main(async () => {
     const input = (await Actor.getInput()) || {};
     let {
@@ -476,6 +526,13 @@ Actor.main(async () => {
             }
 
             const locNorm = normalizeLocation(loc);
+            if (!locNorm.remote_type) {
+                const remoteLabel = extractRemoteInfo($);
+                if (remoteLabel) locNorm.remote_type = remoteLabel;
+                if (remoteLabel && remoteLabel.toLowerCase().includes('remote')) {
+                    locNorm.is_remote = true;
+                }
+            }
 
             if (!data.date_posted) {
                 const dateEl = $('time[datetime], .posted-date, [class*="date"]').first();
@@ -492,11 +549,7 @@ Actor.main(async () => {
             }
 
             if (!data.salary) {
-                data.salary =
-                    $('.job-salary, .compensation')
-                        .first()
-                        .text()
-                        .trim() || null;
+                data.salary = extractSalary($, data.description_text);
             }
 
             const item = {
