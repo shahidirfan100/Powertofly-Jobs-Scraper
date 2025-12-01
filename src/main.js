@@ -403,7 +403,6 @@ Actor.main(async () => {
         persistCookiesPerSession: true,
         requestHandlerTimeoutSecs: 45,
         maxRequestRetries: 5,
-        additionalHttpHeaders: baseHeaders,
         preNavigationHooks: [
             async ({ request }, gotoOptions) => {
                 gotoOptions.headers = { ...baseHeaders, ...(gotoOptions.headers || {}) };
