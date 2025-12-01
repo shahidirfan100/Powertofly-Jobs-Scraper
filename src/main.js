@@ -5,6 +5,7 @@ import { load as cheerioLoad } from 'cheerio';
 
 const SEARCH_ENDPOINT = 'https://search.prd.powertofly.com/jobs/search';
 const DETAIL_BASE = 'https://powertofly.com/jobs/detail/';
+const SITEMAP_INDEX = 'https://powertofly.com/common/sitemap.xml';
 const DEFAULT_HEADERS = {
     'user-agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -151,6 +152,42 @@ function extractJobId(url) {
     }
 }
 
+async function fetchSitemapJobLinks(limit) {
+    const urls = [];
+
+    async function fetchXml(url) {
+        try {
+            const res = await gotScraping({ url, headers: DEFAULT_HEADERS, timeout: { request: 20000 } });
+            return res.body;
+        } catch (err) {
+            return null;
+        }
+    }
+
+    const indexXml = await fetchXml(SITEMAP_INDEX);
+    if (!indexXml) return urls;
+
+    const indexMatches = Array.from(indexXml.matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) => m[1]);
+    const jobSitemaps = indexMatches.filter((u) => u.includes('/sitemap/jobs/'));
+    const remoteJobSitemaps = indexMatches.filter((u) => u.includes('remote_jobs'));
+    const targets = [...jobSitemaps, ...remoteJobSitemaps];
+
+    for (const sm of targets) {
+        if (urls.length >= limit) break;
+        const xml = await fetchXml(sm);
+        if (!xml) continue;
+        const links = Array.from(xml.matchAll(/<loc>([^<]+)<\/loc>/g))
+            .map((m) => m[1])
+            .filter((u) => u.includes('/jobs/detail/'));
+        for (const link of links) {
+            urls.push(link);
+            if (urls.length >= limit) break;
+        }
+    }
+
+    return urls;
+}
+
 Actor.main(async () => {
     const input = (await Actor.getInput()) || {};
     let {
@@ -176,7 +213,7 @@ Actor.main(async () => {
         ? Math.max(1, Number(MAX_PAGES_RAW))
         : 20;
 
-    const pageSize = Math.min(50, RESULTS_WANTED);
+    const pageSize = Math.min(100, RESULTS_WANTED);
 
     const proxyConf = proxyConfiguration
         ? await Actor.createProxyConfiguration(proxyConfiguration)
@@ -262,7 +299,25 @@ Actor.main(async () => {
     }
 
     if (jobIds.size === 0 && seedDetailUrls.length === 0) {
-        log.warning('No job IDs collected from search. Exiting.');
+        log.warning('No job IDs collected from search. Trying sitemaps as fallback.');
+    }
+
+    if (jobIds.size < RESULTS_WANTED) {
+        const need = RESULTS_WANTED - jobIds.size;
+        log.info(`Attempting sitemap fallback to get +${need} job URLs...`);
+        const sitemapLinks = await fetchSitemapJobLinks(need);
+        for (const link of sitemapLinks) {
+            const id = extractJobId(link);
+            if (!dedupe || !jobIds.has(id)) {
+                jobIds.add(id);
+                seedDetailUrls.push(link);
+            }
+            if (jobIds.size >= RESULTS_WANTED) break;
+        }
+    }
+
+    if (jobIds.size === 0 && seedDetailUrls.length === 0) {
+        log.warning('No job links available after search and sitemap fallback. Exiting.');
         return;
     }
 
