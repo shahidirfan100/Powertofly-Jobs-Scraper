@@ -61,7 +61,7 @@
     "max_pages": {
       "title": "Maximum Pages",
       "type": "integer",
-      "description": "Safety limit on the number of listing pages to crawl. Prevents excessive resource usage.",
+      "description": "Safety limit on the number of API pages (size/from windows) to crawl. Prevents excessive resource usage.",
       "minimum": 1,
       "editor": "number",
       "default": 20

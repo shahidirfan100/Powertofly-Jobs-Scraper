@@ -176,7 +176,7 @@ Actor.main(async () => {
         ? Math.max(1, Number(MAX_PAGES_RAW))
         : 20;
 
-    const perPage = Math.min(50, RESULTS_WANTED);
+    const pageSize = Math.min(50, RESULTS_WANTED);
 
     const proxyConf = proxyConfiguration
         ? await Actor.createProxyConfiguration(proxyConfiguration)
@@ -211,6 +211,7 @@ Actor.main(async () => {
     const jobIds = new Set();
     let totalFromApi = null;
     let page = 1;
+    let offset = 0;
 
     // Seed with explicit job detail URL if provided.
     const seedDetailUrls = [];
@@ -223,7 +224,7 @@ Actor.main(async () => {
 
     while (page <= MAX_PAGES && jobIds.size < RESULTS_WANTED) {
         const proxyUrl = proxyConf ? await proxyConf.newUrl() : undefined;
-        const searchParams = { ...searchFilters, page, per_page: perPage };
+        const searchParams = { ...searchFilters, from: offset, size: pageSize };
 
         try {
             const response = await gotScraping({
@@ -246,7 +247,7 @@ Actor.main(async () => {
 
             const gained = jobIds.size - before;
             log.info(
-                `Page ${page}: fetched ${jobs.length} rows, +${gained} new IDs (total ${jobIds.size})`
+                `Page ${page} (from=${offset}, size=${pageSize}): fetched ${jobs.length} rows, +${gained} new IDs (total ${jobIds.size})`
             );
 
             if (jobs.length === 0 || gained === 0) break;
@@ -256,6 +257,7 @@ Actor.main(async () => {
         }
 
         if (jobIds.size >= RESULTS_WANTED) break;
+        offset += pageSize;
         page += 1;
     }
 

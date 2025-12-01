@@ -8,7 +8,7 @@ The PowerToFly Jobs Scraper automatically extracts job listings from [PowerToFly
 
 ### Key features:
 
-- **API-first listings** - Uses PowerToFly's search API to pull IDs fast and reliably, bypassing infinite scroll
+- **API-first listings** - Uses PowerToFly's search API with `size/from` pagination to pull IDs fast and reliably beyond the 20-item UI limit
 - **Comprehensive data extraction** - Captures titles, company, locations, salary, job type, posted date, and full descriptions
 - **Flexible search options** - Filter by keywords, location, category, sort order, or start from a specific URL
 - **Configurable limits & dedupe** - Cap pages/results, de-duplicate by job ID, and optionally skip detail visits
@@ -46,7 +46,7 @@ Configure your scraping job with these parameters:
 | `collectDetails` | Boolean | Visit each job page to extract full details | `true` |
 | `dedupe` | Boolean | Remove duplicate job IDs before saving | `true` |
 | `results_wanted` | Integer | Maximum number of jobs to extract | `100` |
-| `max_pages` | Integer | Maximum number of listing pages (API pages) to crawl | `20` |
+| `max_pages` | Integer | Maximum number of API pages (size/from windows) to crawl | `20` |
 
 ### Advanced options
 
