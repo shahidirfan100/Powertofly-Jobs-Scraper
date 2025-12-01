@@ -163,7 +163,8 @@ function extractJobId(url) {
 function isBlockedHtml(html) {
     if (!html) return false;
     const lowered = html.toLowerCase();
-    return lowered.includes('captcha') || lowered.includes('recaptcha') || lowered.includes('access denied');
+    // Many pages load recaptcha JS by default; treat only explicit block pages as blocked.
+    return lowered.includes('access denied') || lowered.includes('verify you are human');
 }
 
 async function fetchSitemapJobLinks(limit) {
@@ -402,6 +403,7 @@ Actor.main(async () => {
         persistCookiesPerSession: true,
         requestHandlerTimeoutSecs: 45,
         maxRequestRetries: 5,
+        additionalHttpHeaders: baseHeaders,
         preNavigationHooks: [
             async ({ request }, gotoOptions) => {
                 gotoOptions.headers = { ...baseHeaders, ...(gotoOptions.headers || {}) };
