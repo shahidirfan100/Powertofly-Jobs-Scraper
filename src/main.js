@@ -11,6 +11,14 @@ const DEFAULT_HEADERS = {
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     'accept-language': 'en-US,en;q=0.9',
 };
+const HEADER_GEN_OPTS = {
+    browsers: [
+        { name: 'chrome', minVersion: 113, maxVersion: 124 },
+        { name: 'firefox', minVersion: 110, maxVersion: 124 },
+    ],
+    devices: ['desktop'],
+    operatingSystems: ['windows', 'linux'],
+};
 
 function buildCookieHeader({ cookies, cookiesJson }) {
     const parts = [];
@@ -152,12 +160,24 @@ function extractJobId(url) {
     }
 }
 
+function isBlockedHtml(html) {
+    if (!html) return false;
+    const lowered = html.toLowerCase();
+    return lowered.includes('captcha') || lowered.includes('recaptcha') || lowered.includes('access denied');
+}
+
 async function fetchSitemapJobLinks(limit) {
     const urls = [];
 
     async function fetchXml(url) {
         try {
-            const res = await gotScraping({ url, headers: DEFAULT_HEADERS, timeout: { request: 20000 } });
+            const res = await gotScraping({
+                url,
+                headers: DEFAULT_HEADERS,
+                useHeaderGenerator: true,
+                headerGeneratorOptions: HEADER_GEN_OPTS,
+                timeout: { request: 20000 },
+            });
             return res.body;
         } catch (err) {
             return null;
@@ -247,8 +267,6 @@ Actor.main(async () => {
 
     const jobIds = new Set();
     let totalFromApi = null;
-    let page = 1;
-    let offset = 0;
 
     // Seed with explicit job detail URL if provided.
     const seedDetailUrls = [];
@@ -259,43 +277,81 @@ Actor.main(async () => {
 
     log.info(`Search filters -> keywords: "${keyword}", location: "${location}", category: "${category}"`);
 
-    while (page <= MAX_PAGES && jobIds.size < RESULTS_WANTED) {
-        const proxyUrl = proxyConf ? await proxyConf.newUrl() : undefined;
-        const searchParams = { ...searchFilters, from: offset, size: pageSize };
+    const paginationStrategies = [
+        {
+            name: 'from/size',
+            build: (page) => ({ from: (page - 1) * pageSize, size: pageSize }),
+        },
+        {
+            name: 'offset/limit',
+            build: (page) => ({ offset: (page - 1) * pageSize, limit: pageSize }),
+        },
+        {
+            name: 'page/size',
+            build: (page) => ({ page, size: pageSize }),
+        },
+    ];
 
-        try {
-            const response = await gotScraping({
-                url: SEARCH_ENDPOINT,
-                searchParams,
-                headers: baseHeaders,
-                proxyUrl,
-                timeout: { request: 20000 },
-            });
+    let strategyIndex = 0;
+    while (strategyIndex < paginationStrategies.length && jobIds.size < RESULTS_WANTED) {
+        const strategy = paginationStrategies[strategyIndex];
+        log.info(`Using pagination strategy: ${strategy.name}`);
 
-            const data = JSON.parse(response.body);
-            const jobs = Array.isArray(data.jobs) ? data.jobs : [];
-            totalFromApi = typeof data.total === 'number' ? data.total : totalFromApi;
+        let page = 1;
+        let noGainStreak = 0;
 
-            const before = jobIds.size;
-            for (const job of jobs) {
-                if (!job || !job.id) continue;
-                if (!dedupe || !jobIds.has(job.id)) jobIds.add(job.id);
+        while (page <= MAX_PAGES && jobIds.size < RESULTS_WANTED) {
+            const proxyUrl = proxyConf ? await proxyConf.newUrl() : undefined;
+            const searchParams = { ...searchFilters, ...strategy.build(page) };
+
+            try {
+                const response = await gotScraping({
+                    url: SEARCH_ENDPOINT,
+                    searchParams,
+                    headers: baseHeaders,
+                    proxyUrl,
+                    useHeaderGenerator: true,
+                    headerGeneratorOptions: HEADER_GEN_OPTS,
+                    timeout: { request: 20000 },
+                });
+
+                const data = JSON.parse(response.body);
+                const jobs = Array.isArray(data.jobs) ? data.jobs : [];
+                totalFromApi = typeof data.total === 'number' ? data.total : totalFromApi;
+
+                const firstId = jobs[0]?.id;
+                const before = jobIds.size;
+                for (const job of jobs) {
+                    if (!job || !job.id) continue;
+                    if (!dedupe || !jobIds.has(job.id)) jobIds.add(job.id);
+                }
+
+                const gained = jobIds.size - before;
+                log.info(
+                    `Strategy ${strategy.name} page ${page}: firstId=${firstId}, rows=${jobs.length}, +${gained}, total=${jobIds.size}`
+                );
+
+                if (jobs.length === 0) break;
+
+                if (gained === 0) {
+                    noGainStreak += 1;
+                    if (noGainStreak >= 2) {
+                        log.info(`No gains for ${noGainStreak} pages; trying next strategy.`);
+                        break;
+                    }
+                } else {
+                    noGainStreak = 0;
+                }
+            } catch (err) {
+                log.error(`Search page ${page} (${strategy.name}) failed: ${err.message}`);
+                break;
             }
 
-            const gained = jobIds.size - before;
-            log.info(
-                `Page ${page} (from=${offset}, size=${pageSize}): fetched ${jobs.length} rows, +${gained} new IDs (total ${jobIds.size})`
-            );
-
-            if (jobs.length === 0 || gained === 0) break;
-        } catch (err) {
-            log.error(`Search page ${page} failed: ${err.message}`);
-            break;
+            if (jobIds.size >= RESULTS_WANTED) break;
+            page += 1;
         }
 
-        if (jobIds.size >= RESULTS_WANTED) break;
-        offset += pageSize;
-        page += 1;
+        strategyIndex += 1;
     }
 
     if (jobIds.size === 0 && seedDetailUrls.length === 0) {
@@ -305,7 +361,7 @@ Actor.main(async () => {
     if (jobIds.size < RESULTS_WANTED) {
         const need = RESULTS_WANTED - jobIds.size;
         log.info(`Attempting sitemap fallback to get +${need} job URLs...`);
-        const sitemapLinks = await fetchSitemapJobLinks(need);
+        const sitemapLinks = await fetchSitemapJobLinks(need * 2); // grab extra to cover dedupe
         for (const link of sitemapLinks) {
             const id = extractJobId(link);
             if (!dedupe || !jobIds.has(id)) {
@@ -341,11 +397,42 @@ Actor.main(async () => {
     let saved = 0;
     const detailCrawler = new CheerioCrawler({
         proxyConfiguration: proxyConf,
-        maxConcurrency: 20,
-        requestHandlerTimeoutSecs: 30,
-        maxRequestRetries: 3,
-        requestHandler: async ({ request, $, body }) => {
+        maxConcurrency: 5,
+        useSessionPool: true,
+        persistCookiesPerSession: true,
+        requestHandlerTimeoutSecs: 45,
+        maxRequestRetries: 5,
+        useHeaderGenerator: true,
+        headerGeneratorOptions: HEADER_GEN_OPTS,
+        preNavigationHooks: [
+            async ({ request }, gotoOptions) => {
+                gotoOptions.headers = { ...baseHeaders, ...(gotoOptions.headers || {}) };
+                // add referer to mimic navigation from listing
+                if (!gotoOptions.headers.Referer) {
+                    gotoOptions.headers.Referer = 'https://powertofly.com/jobs';
+                }
+            },
+        ],
+        failedRequestHandler: async ({ request, error }) => {
             if (saved >= RESULTS_WANTED) return;
+            log.warning(`Failed ${request.url} after retries: ${error?.message || error}`);
+            // push minimal stub so we don't stall counts entirely
+            await Dataset.pushData({
+                job_id: extractJobId(request.url),
+                url: request.url,
+                title: null,
+                company: null,
+            });
+            saved += 1;
+        },
+        requestHandler: async ({ request, $, body, session }) => {
+            if (saved >= RESULTS_WANTED) return;
+
+            // Detect block/captcha and force retry
+            if (body && isBlockedHtml(body)) {
+                session?.markBad();
+                throw new Error('Blocked / captcha detected');
+            }
 
             if (!$ && body) $ = cheerioLoad(body);
             if (!$) {
