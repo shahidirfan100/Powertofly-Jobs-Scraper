@@ -402,8 +402,6 @@ Actor.main(async () => {
         persistCookiesPerSession: true,
         requestHandlerTimeoutSecs: 45,
         maxRequestRetries: 5,
-        useHeaderGenerator: true,
-        headerGeneratorOptions: HEADER_GEN_OPTS,
         preNavigationHooks: [
             async ({ request }, gotoOptions) => {
                 gotoOptions.headers = { ...baseHeaders, ...(gotoOptions.headers || {}) };
