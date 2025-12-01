@@ -23,12 +23,6 @@
       "description": "Filter jobs by location (e.g., 'New York', 'Remote', 'San Francisco'). Leave empty to search all locations.",
       "editor": "textfield"
     },
-    "category": {
-      "title": "Job Category",
-      "type": "string",
-      "description": "Filter by job category or industry (e.g., 'Technology', 'Marketing', 'Finance').",
-      "editor": "textfield"
-    },
     "collectDetails": {
       "title": "Collect Full Job Details",
       "type": "boolean",
@@ -61,27 +55,7 @@
         "useApifyProxy": true,
         "apifyProxyGroups": ["RESIDENTIAL"]
       }
-    },
-    "cookies": {
-      "title": "Custom Cookies (Raw)",
-      "type": "string",
-      "description": "Optional: Provide custom cookies as a raw 'Cookie' header string to bypass consent screens or maintain sessions.",
-      "editor": "textfield"
-    },
-    "cookiesJson": {
-      "title": "Custom Cookies (JSON)",
-      "type": "string",
-      "description": "Optional: Provide cookies in JSON format as an array (e.g., [{\"name\":\"sessionId\",\"value\":\"123\"}]) or object map.",
-      "editor": "textarea"
-    },
-    "dedupe": {
-      "title": "Deduplicate Results",
-      "type": "boolean",
-      "description": "Automatically remove duplicate job postings based on URL to ensure unique results.",
-      "editor": "checkbox",
-      "default": true
-  }
-}
-  "required": [],
+    }
+  },
   "additionalProperties": false
 }
